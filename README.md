@@ -23,4 +23,16 @@ The architecture of this project would look something like:
 ![Architecture](https://github.com/adiprerepa/distributed-wasm-runtime/blob/main/cs128h%20architecture.jpg)
 
 
+## Checkpoints for the PM
 
+Checkpoint 1: Done with the CLI, proof of concept WASM compilation for all three supported languages.
+
+Checkpoint 2: Done with server & WASM compilation workflow, networking infrastructure underway and WASM execution on worker POC.
+
+## Possible Challenges
+
+NONE!
+
+Realistically, there are many things that could go wrong, since WebAssembly and Distributed Systems have a lot of moving parts and are not trivial to work with. But we will transcend these challenges.
+
+If anything, there might be problems with conveying what to run from client to worker without being too verbose, but this can be addressed by rethinking design at some point.
