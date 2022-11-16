@@ -1,6 +1,6 @@
 # Distributed Wasm Runtime
 
-Members: Aditya Prerepa (prerepa2), Shashwat Mundra, Aryan Arora
+Members: Aditya Prerepa (prerepa2), Shashwat Mundra (mundra3), Aryan Arora (aarora14)
 
 ## Project Introduction
 
