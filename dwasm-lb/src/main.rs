@@ -28,6 +28,7 @@ mod filters {
     pub fn jobs(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
         job_create(db.clone())
             .or(job_status(db))
+            .or(job_update((db.clone())))
     }
 
     // POST /new_job
@@ -46,6 +47,15 @@ mod filters {
             .and(warp::query::<JobOptions>())
             .and(with_db(db))
             .and_then(handlers::status_job)
+    }
+
+    // POST /job_update/<id>
+    pub fn job_update(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+        warp::path!("job_update" / i32)
+            .and(warp::post())
+            .and(json_body())
+            .and(with_db(db))
+            .and_then(handlers::job_update)
     }
 
     fn with_db(db: Db) -> impl Filter<Extract = (Db,), Error = std::convert::Infallible> + Clone {
@@ -70,7 +80,7 @@ mod handlers {
     use tokio::sync::MutexGuard;
     use warp::http::StatusCode;
     use warp::{Filter, http::Response};
-    use crate::models::{CreateJobResponse, JobModel};
+    use crate::models::{CreateJobResponse, JobModel, JobUpdate};
 
     pub async fn create_job(job: Job, db: Db) -> Result<impl warp::Reply, Infallible> {
         println!("create job: {:?}", job);
@@ -113,6 +123,21 @@ mod handlers {
         let json = warp::reply::json(&job);
         return Ok(warp::reply::with_status(json, StatusCode::OK));
     }
+
+    pub async fn job_update(id: i32, update: JobUpdate, db: Db) -> Result<impl warp::Reply, Infallible> {
+        println!("job update: {:?}", update);
+        let mut map = db.lock().await;
+        if !map.contains_key(&id) {
+            return Ok(StatusCode::NOT_FOUND);
+        }
+        let mut model = map.get(&id).unwrap().clone();
+        model.finished = true;
+        model.exec_output = update.exec_output;
+        model.finished_at = update.finished_at;
+        map.insert(id, model);
+        println!("updated to: {:?}", model);
+        return Ok(StatusCode::OK);
+    }
 }
 
 mod models {
@@ -145,6 +170,13 @@ mod models {
     #[derive(Debug, Deserialize)]
     pub struct JobOptions {
         pub id: Option<i32>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug)]
+    pub struct JobUpdate {
+        pub job_id: i32,
+        pub exec_output: String,
+        pub finished_at: u64,
     }
 
     #[derive(Deserialize, Serialize, Clone, Debug)]
