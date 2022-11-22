@@ -11,14 +11,17 @@ async fn main() {
 
     let db = blank_db();
 
-    warp::serve(hello)
+    let api = filters::jobs(db);
+
+    let jobs = api.with(warp::log("dwasm-lb"));
+    warp::serve(jobs)
         .run(([127, 0, 0, 1], 3030))
         .await;
 }
 
 mod filters {
     use warp::Filter;
-    use crate::models::{Db, JobOptions};
+    use crate::models::{Db, Job, JobOptions};
     use super::handlers;
 
     // combined filters
@@ -40,15 +43,16 @@ mod filters {
     pub fn job_status(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
         warp::path!("job_status")
             .and(warp::get())
+            .and(warp::query::<JobOptions>())
             .and(with_db(db))
-            .and(warp::query::<JobOptions>)
+            .and_then(handlers::status_job)
     }
 
     fn with_db(db: Db) -> impl Filter<Extract = (Db,), Error = std::convert::Infallible> + Clone {
         warp::any().map(move || db.clone())
     }
 
-    fn json_body() -> impl Filter<Extract = (Todo,), Error = warp::Rejection> + Clone {
+    fn json_body() -> impl Filter<Extract = (Job,), Error = warp::Rejection> + Clone {
         // When accepting a body, we want a JSON body
         // (and to reject huge payloads)...
         warp::body::content_length_limit(1024 * 64).and(warp::body::json())
@@ -66,7 +70,7 @@ mod handlers {
     use tokio::sync::MutexGuard;
     use warp::http::StatusCode;
     use warp::{Filter, http::Response};
-    use crate::models::JobModel;
+    use crate::models::{CreateJobResponse, JobModel};
 
     pub async fn create_job(job: Job, db: Db) -> Result<impl warp::Reply, Infallible> {
         println!("create job: {:?}", job);
@@ -75,12 +79,12 @@ mod handlers {
         let mut id: i32 = 0;
         let base: i32 = 10;
         loop {
-            id = rng.gen_range(0, base.pow(8));
+            id = rng.gen_range(0..base.pow(8));
             if !map.contains_key(&id) {
                 break;
             }
         }
-        let started_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
+        let started_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
         map.insert(id, JobModel{
             job: job.clone(),
             finished: false,
@@ -89,28 +93,25 @@ mod handlers {
             job_id: id,
             exec_output: String::from(""),
         });
-        let reply = warp::any().map(|| {
-            Response::builder()
-                .status(StatusCode::OK)
-                .body(id)
-        });
-        Ok(reply)
+        let json = warp::reply::json(&CreateJobResponse{ id });
+        Ok(warp::reply::with_status(json, StatusCode::OK))
     }
 
     pub async fn status_job(opts: JobOptions, db: Db) -> Result<impl warp::Reply, Infallible> {
-        let mut map = db.lock().await;
+        let map = db.lock().await;
         let id = match opts.id {
             Some(i) => i,
             None => -1,
         };
         if id < 0 {
-            return Ok(StatusCode::BAD_REQUEST);
+            return Ok(warp::reply::with_status(warp::reply::json(&()), StatusCode::BAD_REQUEST));
         }
-        if !map.contains_key(&opts.id?) {
-            return Ok(StatusCode::NOT_FOUND);
+        if !map.contains_key(&id) {
+            return Ok(warp::reply::with_status(warp::reply::json(&()), StatusCode::NOT_FOUND));
         }
-        let job = map.get(&opts.id?)?;
-        Ok(warp::reply::json(job))
+        let job = map.get(&id).unwrap().clone();
+        let json = warp::reply::json(&job);
+        return Ok(warp::reply::with_status(json, StatusCode::OK));
     }
 }
 
@@ -144,6 +145,16 @@ mod models {
     #[derive(Debug, Deserialize)]
     pub struct JobOptions {
         pub id: Option<i32>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug)]
+    pub struct CreateJobResponse {
+        pub id: i32,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug)]
+    pub struct ErrorResponse {
+        message: String,
     }
 
     pub fn blank_db() -> Db {
