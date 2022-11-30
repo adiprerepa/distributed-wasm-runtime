@@ -1,17 +1,14 @@
 use warp::Filter;
-use crate::models::blank_db;
+use crate::models::{blank_db, blank_worker_index};
 use rand::Rng;
 
 
 #[tokio::main]
 async fn main() {
-    // GET /hello/warp => 200 OK with body "Hello, warp!"
-    let hello = warp::path!("hello"/ String)
-        .map(|name| format!("Hello, {}!", name));
-
     let db = blank_db();
+    let worker_index = blank_worker_index();
 
-    let api = filters::jobs(db);
+    let api = filters::jobs(db, worker_index);
 
     let jobs = api.with(warp::log("dwasm-lb"));
     warp::serve(jobs)
@@ -21,21 +18,24 @@ async fn main() {
 
 mod filters {
     use warp::Filter;
-    use crate::models::{Db, Job, JobOptions};
+    use crate::models::{Db, Job, JobOptions, JobUpdate, Worker, WorkerIndex};
     use super::handlers;
 
     // combined filters
-    pub fn jobs(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    pub fn jobs(db: Db, worker_index: WorkerIndex) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
         job_create(db.clone())
-            .or(job_status(db))
-            .or(job_update((db.clone())))
+            .or(job_status(db.clone()))
+            .or(job_update(db))
+            .or()
     }
+
+    // jobs
 
     // POST /new_job
     pub fn job_create(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
         warp::path!("new_job")
             .and(warp::post())
-            .and(json_body())
+            .and(json_body_job())
             .and(with_db(db))
             .and_then(handlers::create_job)
     }
@@ -53,25 +53,54 @@ mod filters {
     pub fn job_update(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
         warp::path!("job_update" / i32)
             .and(warp::post())
-            .and(json_body())
+            .and(json_body_job_update())
             .and(with_db(db))
             .and_then(handlers::job_update)
     }
+
+    // workers
+
+    // POST /register_worker
+    pub fn register_worker(worker_index: WorkerIndex) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+        warp::path!("register_worker")
+            .and(warp::post())
+            .and(json_body_register_worker())
+            .and(with_worker_index(worker_index))
+            .and(warp::addr::remote())
+            .and_then(handlers::register_worker)
+    }
+
+
 
     fn with_db(db: Db) -> impl Filter<Extract = (Db,), Error = std::convert::Infallible> + Clone {
         warp::any().map(move || db.clone())
     }
 
-    fn json_body() -> impl Filter<Extract = (Job,), Error = warp::Rejection> + Clone {
+    fn with_worker_index(worker_index: WorkerIndex) -> impl Filter<Extract = (WorkerIndex,), Error = std::convert::Infallible> + Clone {
+        warp::any().map(move || worker_index.clone())
+    }
+
+    fn json_body_job() -> impl Filter<Extract = (Job,), Error = warp::Rejection> + Clone {
         // When accepting a body, we want a JSON body
         // (and to reject huge payloads)...
         warp::body::content_length_limit(1024 * 64).and(warp::body::json())
+    }
+
+    fn json_body_job_update() -> impl Filter<Extract = (JobUpdate,), Error = warp::Rejection> + Clone {
+        // When accepting a body, we want a JSON body
+        // (and to reject huge payloads)...
+        warp::body::content_length_limit(1024 * 64).and(warp::body::json())
+    }
+
+    fn json_body_register_worker() -> impl Filter<Extract = (Worker,), Error = warp::Rejection> + Clone {
+        warp::body::content_length_limit(1024*64).and(warp::body::json())
     }
 }
 
 mod handlers {
     use std::collections::HashMap;
     use std::convert::Infallible;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::SystemTime;
     use super::models::Db;
     use super::models::{Job, JobOptions};
@@ -80,7 +109,7 @@ mod handlers {
     use tokio::sync::MutexGuard;
     use warp::http::StatusCode;
     use warp::{Filter, http::Response};
-    use crate::models::{CreateJobResponse, JobModel, JobUpdate};
+    use crate::models::{CreateJobResponse, JobModel, JobUpdate, Worker, WorkerIndex};
 
     pub async fn create_job(job: Job, db: Db) -> Result<impl warp::Reply, Infallible> {
         println!("create job: {:?}", job);
@@ -134,20 +163,69 @@ mod handlers {
         model.finished = true;
         model.exec_output = update.exec_output;
         model.finished_at = update.finished_at;
+        println!("updated to: {:?}", model.clone());
         map.insert(id, model);
-        println!("updated to: {:?}", model);
         return Ok(StatusCode::OK);
     }
+
+    // todo check if the worker should really send it's own ip address over the connection (is it necessary?)
+    pub async fn register_worker(worker: Worker, worker_index: WorkerIndex, addr: Option<SocketAddr>) -> Result<impl warp::Reply, Infallible> {
+        println!("registering worker: {:?}", worker);
+        let ip: IpAddr = match addr {
+            Some(x) => x.ip().clone(),
+            None => IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+        };
+        let mut to_insert = worker.clone();
+        to_insert.ip_addr = ip.into_string();
+        let mut index = worker_index.lock().await;
+        index.insert(ip, to_insert);
+        Ok(StatusCode::OK)
+    }
+}
+
+mod wasm {
+    use std::ops::Add;
+    use std::process::Command;
+
+    // takes rust source path, returns compiled wasm path
+    pub fn compile_wasm(rust_file: &str, job_id: &str) -> String {
+        let wasm_file_name = String::from("/tmp/".to_owned().add(&job_id.to_owned()).add(".wasm"));
+        // rustc <rust_file> -o <wasm_file_name> --target wasm32-wasi
+        Command::new("rustc")
+            .args([rust_file, "-o", &wasm_file_name.clone(), "--target", "wasm32-wasi"])
+            .output().expect("");
+        wasm_file_name
+    }
+}
+
+mod workers {
+    use std::net::IpAddr;
+    use crate::models::{Job, Worker};
+
+    pub fn match_worker(job: Job) -> IpAddr {
+        // algorithm for matching job to worker
+        // minimize(sum of abs(job.constraint - worker_n.constraint))
+        // weight cpu/memory as 0.5
+        todo!()
+    }
+
+    // do we return statuses from here?
+    pub fn worker_request_job(job: Job, worker: Worker) -> None {
+
+    }
+
 }
 
 mod models {
     use std::collections::HashMap;
+    use std::net::{IpAddr, Ipv4Addr};
     use serde::{Deserialize, Serialize};
     use std::sync::Arc;
     use std::time::SystemTime;
     use tokio::sync::Mutex;
 
     pub type Db = Arc<Mutex<HashMap<i32, JobModel>>>;
+    pub type WorkerIndex = Arc<Mutex<HashMap<IpAddr, Worker>>>;
 
     #[derive(Debug, Deserialize, Serialize, Clone)]
     pub struct Job {
@@ -189,7 +267,22 @@ mod models {
         message: String,
     }
 
+    // Workers
+    #[derive(Deserialize, Serialize, Clone, Debug)]
+    pub struct Worker {
+        pub ip_addr: String,
+        pub port: i32,
+        pub num_cpu: i32,
+        pub memory_capacity_mb: i32,
+        pub is_busy: bool,
+        pub offline: bool,
+    }
+
     pub fn blank_db() -> Db {
         return Arc::new(Mutex::new(HashMap::new()));
+    }
+
+    pub fn blank_worker_index() -> WorkerIndex {
+        return Arc::new(Mutex::new(HashMap::new()))
     }
 }
