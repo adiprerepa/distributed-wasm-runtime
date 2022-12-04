@@ -12,17 +12,18 @@ fn main() -> Result<()> {
     // share this context. `WasiCtxBuilder` provides a number of ways to
     // configure what the target program will have access to.
     let wasi = WasiCtxBuilder::new()
-        .inherit_stdio()
+        .stdout()
         .inherit_args()?
         .build();
     let mut store = Store::new(&engine, wasi);
 
     // Instantiate our module with the imports we've created, and run it.
-    let module = Module::from_file(&engine, "main.wasm")?;
+    let module = Module::from_file(&engine, "target/main.wasm")?;
     linker.module(&mut store, "", &module)?;
     linker
         .get_default(&mut store, "")?
         .typed::<(), (), _>(&store)?
         .call(&mut store, ())?;
+
     Ok(())
 }
