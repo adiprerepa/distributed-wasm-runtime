@@ -1,6 +1,14 @@
 use serde::{Deserialize, Serialize};
 use distributed_wasm_runtime::modules::CreateJobResponse;
 
+
+/*
+Cli should have two commands;
+
+run <src>.rs outputs an id
+
+status <id> outputs job statistics
+ */
 #[tokio::main]
 async fn main() -> Result<(), reqwest::Error> {
     let job = models::Job {

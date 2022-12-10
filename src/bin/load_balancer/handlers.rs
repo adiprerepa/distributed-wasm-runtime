@@ -2,16 +2,17 @@
 mod handlers {
     use std::collections::HashMap;
     use std::convert::Infallible;
+    use std::fs::File;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::SystemTime;
     use rand::Rng;
-    use distributed_wasm_runtime::modules::{CreateJobResponse, Db, Job, JobModel, JobOptions, JobUpdate, Worker, WorkerIndex};
+    use distributed_wasm_runtime::modules::{CreateJobResponse, Db, Job, JobModel, JobOptions, JobUpdate, WasmPayload, WasmRunResult, Worker, WorkerIndex};
     use rand::rngs::ThreadRng;
     use tokio::sync::MutexGuard;
     use warp::http::StatusCode;
+    use crate::wasm::wasm;
 
-
-    pub async fn create_job(job: Job, db: Db) -> Result<impl warp::Reply, Infallible> {
+    pub async fn create_job(job: Job, db: Db, worker_index: WorkerIndex) -> Result<impl warp::Reply, Infallible> {
         println!("create job: {:?}", job);
         let mut map: MutexGuard<HashMap<i32, JobModel>> = db.lock().await;
         let mut rng: ThreadRng = rand::thread_rng();
@@ -24,16 +25,44 @@ mod handlers {
             }
         }
         let started_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        let json = warp::reply::json(&CreateJobResponse{ id });
+
+        // compile wasm
+        let rust_src_file = wasm::write_rust_src(job.rust_src.as_str(), job.job_name.as_str());
+        let wasm_file = File::open(wasm::compile_wasm(rust_src_file.as_str(), job.job_name.as_str()))?;
+
+        // read wasm into Vec<u8>
+        let mut payload: Vec<u8> = Vec::new();
+        wasm_file.read_to_end(&mut payload)?;
+
+        // call worker (sync)
+        let worker_index = worker_index.lock().await;
+        let worker_ip = match_worker(job.cpus, job.memory_mb, worker_index);
+        let endpoint: String = "http://" + worker_ip.to_string().as_str() + ":3031/accept_job";
+        let worker_request = WasmPayload {
+            payload,
+            job_name: job.job_name,
+        };
+        let client = reqwest::Client::new();
+        let response = client.post(endpoint)
+            .json(&worker_request)
+            .send()
+            .await?
+            .json::<WasmRunResult>()
+            .await?;
+        println!("got output: {:?}", response.output);
+
+        let ended_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+
         map.insert(id, JobModel{
             job: job.clone(),
-            finished: false,
-            finished_at: 0,
+            finished: true,
+            finished_at: ended_at.as_secs(),
             started_at: started_at.as_secs(),
             job_id: id,
-            exec_output: String::from(""),
+            exec_output: response.output,
         });
-        let json = warp::reply::json(&CreateJobResponse{ id });
-        // call worker
+
         Ok(warp::reply::with_status(json, StatusCode::OK))
     }
 
@@ -81,5 +110,12 @@ mod handlers {
         let mut index = worker_index.lock().await;
         index.insert(ip, to_insert);
         Ok(StatusCode::OK)
+    }
+
+    pub fn match_worker(cpus: i32, memory: i32, worker_index: MutexGuard<HashMap<IpAddr, Worker>>) -> IpAddr {
+        match worker_index.keys().next() {
+            Some(&ip) => ip,
+            None => IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        }
     }
 }

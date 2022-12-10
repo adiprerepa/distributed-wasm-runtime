@@ -486,6 +486,7 @@ dependencies = [
  "serde",
  "tokio",
  "warp",
+ "wasi-common",
  "wasmtime",
  "wasmtime-wasi",
 ]

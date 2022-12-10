@@ -11,10 +11,10 @@ pub mod modules {
 
     #[derive(Debug, Deserialize, Serialize, Clone)]
     pub struct Job {
-        rust_src: String,
-        cpus: i32,
-        memory_mb: i32,
-        job_name: String,
+        pub rust_src: String,
+        pub cpus: i32,
+        pub memory_mb: i32,
+        pub job_name: String,
     }
 
     #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -64,6 +64,11 @@ pub mod modules {
     pub struct WasmPayload {
         pub payload: Vec<u8>,
         pub job_name: String,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug)]
+    pub struct WasmRunResult {
+        pub output: String,
     }
 
     pub fn blank_db() -> Db {

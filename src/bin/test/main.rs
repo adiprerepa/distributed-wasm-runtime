@@ -1,4 +1,8 @@
+use std::borrow::{Borrow, BorrowMut};
+use std::str::from_utf8;
 use anyhow::Result;
+use wasi_common::pipe::WritePipe;
+use wasi_common::WasiCtx;
 use wasmtime::*;
 use wasmtime_wasi::sync::WasiCtxBuilder;
 
@@ -8,11 +12,13 @@ fn main() -> Result<()> {
     let mut linker = Linker::new(&engine);
     wasmtime_wasi::add_to_linker(&mut linker, |s| s)?;
 
+    let out = WritePipe::new_in_memory();
     // Create a WASI context and put it in a Store; all instances in the store
     // share this context. `WasiCtxBuilder` provides a number of ways to
     // configure what the target program will have access to.
-    let wasi = WasiCtxBuilder::new()
-        .stdout()
+    let mut wasi = WasiCtxBuilder::new()
+        .stdout(Box::new(out.clone()))
+        // .inherit_stdout()
         .inherit_args()?
         .build();
     let mut store = Store::new(&engine, wasi);
@@ -25,5 +31,9 @@ fn main() -> Result<()> {
         .typed::<(), (), _>(&store)?
         .call(&mut store, ())?;
 
+    drop(store);
+    let res = out.try_into_inner().expect("shit").into_inner();
+
+    println!("{:?}", from_utf8(&&res)?);
     Ok(())
 }

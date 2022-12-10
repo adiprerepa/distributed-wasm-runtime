@@ -1,23 +1,24 @@
 pub mod filters {
     use warp::Filter;
-    use distributed_wasm_runtime::modules::{Db, Job, JobOptions, JobUpdate, Worker, WorkerIndex};
+    use distributed_wasm_runtime::modules::{blank_worker_index, Db, Job, JobOptions, JobUpdate, Worker, WorkerIndex};
     use crate::handlers;
     use super::handlers;
 
     // combined filters
     pub fn jobs(db: Db, worker_index: WorkerIndex) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-        job_create(db.clone())
+        job_create(db.clone(), worker_index.clone())
             .or(job_status(db.clone()))
             .or(job_update(db))
             .or(register_worker(worker_index))
     }
 
     // POST /new_job
-    pub fn job_create(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    pub fn job_create(db: Db, worker_index: WorkerIndex) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
         warp::path!("new_job")
             .and(warp::post())
             .and(json_body_job())
             .and(with_db(db))
+            .and(with_worker_index(worker_index))
             .and_then(handlers::create_job)
     }
 

@@ -10,5 +10,5 @@ async fn main() {
     let workers = api.with(warp::log("dwasm-worker"));
 
     warp::serve(workers)
-        .run(([127, 0, 0, 1], 3030))
+        .run(([127, 0, 0, 1], 3031))
 }

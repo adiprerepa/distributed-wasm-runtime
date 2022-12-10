@@ -1,7 +1,14 @@
 
-mod wasm {
+pub mod wasm {
+    use std::fs;
     use std::ops::Add;
     use std::process::Command;
+
+    pub fn write_rust_src(rust_src: &str, job_id: &str) -> String {
+        let path = "/tmp/" + job_id + ".rs";
+        fs::write(path, rust_src).expect("unable to write file");
+        path
+    }
 
     // takes rust source path, returns compiled wasm path
     pub fn compile_wasm(rust_file: &str, job_id: &str) -> String {
