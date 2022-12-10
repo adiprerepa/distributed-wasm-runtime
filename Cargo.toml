@@ -17,3 +17,4 @@ wasmtime-wasi = "3.0.1"
 anyhow = "1.0.66"
 wasi-common = "3.0.1"
 clap = { version = "4.0.29", features = ["derive"] }
+substring = "1.4.5"

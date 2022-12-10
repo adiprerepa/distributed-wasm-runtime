@@ -16,7 +16,7 @@ pub mod handlers {
         println!("running {:?}", payload.job_name);
         let engine = Engine::default();
         let mut linker = Linker::new(&engine);
-        wasmtime_wasi::add_to_linker(&mut linker, |s| s)?;
+        wasmtime_wasi::add_to_linker(&mut linker, |s| s).unwrap();
 
         let out = WritePipe::new_in_memory();
         // Create a WASI context and put it in a Store; all instances in the store
@@ -24,19 +24,20 @@ pub mod handlers {
         // configure what the target program will have access to.
         let mut wasi = WasiCtxBuilder::new()
             .stdout(Box::new(out.clone()))
-            .inherit_args()?
+            .inherit_args().unwrap()
             .build();
         let mut store = Store::new(&engine, wasi);
 
         // Instantiate our module with the imports we've created, and run it.
-        let module = Module::from_binary(&engine, &&payload.payload)?;
-        linker.module(&mut store, "", &module)?;
+        let module = Module::from_binary(&engine, &&payload.payload).unwrap();
+        linker.module(&mut store, "", &module).unwrap();
         linker
-            .get_default(&mut store, "")?
-            .typed::<(), (), _>(&store)?
-            .call(&mut store, ())?;
+            .get_default(&mut store, "").unwrap()
+            .typed::<(), (), _>(&store).unwrap()
+            .call(&mut store, ()).unwrap();
         drop(store);
-        let res = from_utf8(out.try_into_inner().expect("shit").into_inner()?)?;
+        let raw_result = out.try_into_inner().expect("unable to convert").into_inner();
+        let res = from_utf8(&&raw_result).unwrap().to_string();
         println!("job result: {:?}", res);
 
         let wasm_result = WasmRunResult {output: String::from(res)};

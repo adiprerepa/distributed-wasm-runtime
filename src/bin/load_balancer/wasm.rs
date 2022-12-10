@@ -1,12 +1,22 @@
 
 pub mod wasm {
-    use std::fs;
+    use std::{fs, io};
+    use std::fs::OpenOptions;
     use std::ops::Add;
+    use std::path::Path;
     use std::process::Command;
 
     pub fn write_rust_src(rust_src: &str, job_id: &str) -> String {
-        let path = "/tmp/" + job_id + ".rs";
-        fs::write(path, rust_src).expect("unable to write file");
+        let path = format!("/tmp/{job_id}.rs");
+        match OpenOptions::new().create(true).write(true).open(Path::new(path.as_str())) {
+            Ok(_) => {
+                println!("created {:?}", path);
+            },
+            Err(e) => {
+                println!("couldn't touch {:?}: {:?}", path, e);
+            }
+        }
+        fs::write(path.clone(), rust_src).expect("unable to write file");
         path
     }
 

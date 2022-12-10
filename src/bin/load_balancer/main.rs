@@ -4,6 +4,7 @@ mod wasm;
 
 use distributed_wasm_runtime::modules::*;
 use crate::filters::filters::jobs;
+use warp::Filter;
 
 #[tokio::main]
 async fn main() {
@@ -13,5 +14,8 @@ async fn main() {
     let jobs = api.with(warp::log("dwasm-lb"));
 
     warp::serve(jobs)
-        .run(([127, 0, 0, 1], 3030));
+        .run(([127, 0, 0, 1], 3030))
+        .await;
+
+    println!("hi");
 }

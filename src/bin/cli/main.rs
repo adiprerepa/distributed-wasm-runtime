@@ -1,7 +1,10 @@
+use std::borrow::Borrow;
 use std::fs;
 use serde::{Deserialize, Serialize};
 use distributed_wasm_runtime::modules::{CreateJobResponse, Job, JobModel, WasmRunResult};
 use clap::{Args, Parser, Subcommand};
+use rand::Error;
+use substring::Substring;
 use warp::hyper::body::HttpBody;
 
 /*
@@ -17,8 +20,8 @@ struct DwasmCli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    #[arg(short, long, default_value_t="127.0.0.1:3030")]
-    server_endpoint: String,
+    #[arg(short, long)]
+    server_endpoint: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -37,8 +40,8 @@ struct Run {
     #[arg(short, long, default_value_t=1000)]
     memory_mb: i32,
 
-    #[arg(short, long, default_value_t="job_xyz")]
-    job_name: String,
+    #[arg(short, long)]
+    job_name: Option<String>,
 }
 
 #[derive(Args)]
@@ -51,24 +54,35 @@ struct Status {
 async fn main() -> Result<(), reqwest::Error> {
     let cli = DwasmCli::parse();
     let client = reqwest::Client::new();
-    let server_url = "http://".into_string() + cli.server_endpoint.as_str();
+    let endpoint = cli.server_endpoint.unwrap_or("127.0.0.1:3030".to_string());
+    let server_url = format!("http://{endpoint}");
 
     match &cli.command {
-        Commands::Run(run) => {
-            let rs_source = match fs::read_to_string(run.source?) {
+        Some(Commands::Run(run)) => {
+            let rs_source_path = match run.source.clone() {
+                Some(path) => path,
+                None => {
+                    println!("rust path not found, please re-run.");
+                    // todo better error handling here, it'll just output and keep running
+                    String::from("")
+                }
+            };
+
+            let rs_source = match fs::read_to_string(rs_source_path.to_string()) {
                 Ok(data) => data,
                 Err(e) => {
                     println!("unable to read file: {:?}", e);
-                    ""
+                    String::from("")
                 }
             };
+            let job_name = run.job_name.clone().unwrap_or(rs_source_path.substring(0, rs_source_path.len() - 2).to_string());
             let job = Job {
                 rust_src: rs_source,
                 cpus: run.cpus,
                 memory_mb: run.memory_mb,
-                job_name: run.job_name.clone(),
+                job_name,
             };
-            let response = client.post(server_url + "/new_job")
+            let response = client.post(format!("{server_url}/new_job"))
                 .json(&job)
                 .send()
                 .await?
@@ -76,14 +90,28 @@ async fn main() -> Result<(), reqwest::Error> {
                 .await?;
             println!("job running, id: {:?}.", response.id);
         }
-        Commands::Status(status) => {
-            let id = status.id?;
+        Some(Commands::Status(status)) => {
+            let id = match status.id {
+                Some(id) => id,
+                None => {
+                    println!("please include an id");
+                    0
+                }
+            };
             let response = client.get(format!("{server_url}/job_status?id={id}"))
                 .send()
-                .await?
+                .await?;
+
+            if response.status() == 404 {
+                println!("job id {:?} doesn't exist", id);
+            }
+            let job_model = response
                 .json::<JobModel>()
                 .await?;
-            println!("job status:\n{:?}", response);
+            println!("job status:\n{:?}", job_model);
+        }
+        None => {
+            println!("default subcommand");
         }
     }
 
