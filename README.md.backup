@@ -96,13 +96,13 @@ To then get output similar to:
 
 ```bash
 job status:
-	name: "sleep"
+	name: "hif"
 	finished: true
-	running time: 6s
-	execution output: "job done, hello!\n"
+	running time (ms): 1
+	execution output: "hi\n"
 ```
 
-The above output was extracted from the WebAssembly execution.
+
 ## Archive
 
 ### Project Introduction

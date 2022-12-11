@@ -7,14 +7,6 @@ use rand::Error;
 use substring::Substring;
 use warp::hyper::body::HttpBody;
 
-/*
-Cli should have two commands;
-
-run <src>.rs --cpu 3 --memory 1000 --name job1
-
-status <id> outputs job statistics
- */
-
 #[derive(Parser)]
 struct DwasmCli {
     #[command(subcommand)]
@@ -108,7 +100,8 @@ async fn main() -> Result<(), reqwest::Error> {
             let job_model = response
                 .json::<JobModel>()
                 .await?;
-            println!("job status:\n{:?}", job_model);
+            println!("job status:\n\tname: {:?}\n\tfinished: {:?}\n\trunning time: {:?}s\n\texecution output: {:?}",
+                     job_model.job.job_name, job_model.finished, job_model.finished_at - job_model.started_at, job_model.exec_output);
         }
         None => {
             println!("default subcommand");

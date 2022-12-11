@@ -19,8 +19,10 @@ pub mod handlers {
         println!("create job: {:?}", job);
         let mut map: MutexGuard<HashMap<i32, JobModel>> = db.lock().await;
         let worker_index = worker_index.lock().await;
-        let mut id: i32 = next_key(&map);
-
+        let mut id = match map.iter().max_by_key(|entry| entry.0.clone()) {
+            Some(e) => e.0.clone() + 1,
+            None => 0,
+        };
         let started_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
         let json = warp::reply::json(&CreateJobResponse{ id });
 
@@ -129,11 +131,4 @@ pub mod handlers {
         }
     }
 
-    fn next_key(db: &MutexGuard<HashMap<i32, JobModel>>) -> i32 {
-        // let mut keys: Vec<i32> = db.clone().into_keys().collect();
-        // println!("keys: {:?}", keys);
-        // keys.sort_unstable();
-        return 0;
-        // return *keys.get(keys.len() - 1);
-    }
 }
